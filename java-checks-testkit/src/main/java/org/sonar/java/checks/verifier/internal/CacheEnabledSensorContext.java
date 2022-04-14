@@ -17,26 +17,33 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
-package org.sonar.java.checks;
+package org.sonar.java.checks.verifier.internal;
 
-import org.sonar.check.Rule;
-import org.sonar.plugins.java.api.tree.MethodInvocationTree;
+import org.sonar.api.batch.sensor.cache.ReadCache;
+import org.sonar.api.batch.sensor.cache.WriteCache;
 
-@Rule(key = "S3011")
-public class AccessibilityChangeCheck extends AbstractAccessibilityChangeChecker {
+public class CacheEnabledSensorContext extends InternalSensorContext {
+
+  private final ReadCache readCache;
+  private final WriteCache writeCache;
+
+  CacheEnabledSensorContext(ReadCache readCache, WriteCache writeCache) {
+    this.readCache = readCache;
+    this.writeCache = writeCache;
+  }
+
   @Override
-  protected void onMethodInvocationFound(MethodInvocationTree mit) {
+  public boolean isCacheEnabled() {
+    return true;
+  }
 
+  @Override
+  public ReadCache previousCache() {
+    return readCache;
+  }
 
-    if (isModifyingFieldFromRecord(mit)) {
-      return;
-    }
-    if (SET_ACCESSIBLE_MATCHER.matches(mit)) {
-      if (setsToPubliclyAccessible(mit)) {
-        reportIssue(mit, "This accessibility update should be removed.");
-      }
-    } else {
-      reportIssue(mit, "This accessibility bypass should be removed.");
-    }
+  @Override
+  public WriteCache nextCache() {
+    return writeCache;
   }
 }

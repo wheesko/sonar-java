@@ -66,6 +66,18 @@ public class JavaAstScanner {
     return visitor.getClasspath();
   }
 
+  /**
+   * Scan files without parsing, using the raw input file and cached information, and return the list of files that could not be analyzed without parsing.
+   * @param inputFiles The list of files to analyze
+   * @return The list of files that could not be successfully analyzed without parsing
+   */
+  public List<InputFile> scanWithoutParsing(Iterable<? extends InputFile> inputFiles) {
+    return StreamSupport.stream(inputFiles.spliterator(), false)
+      // Filter out files that have been successfully scanned without parsing
+      .filter(file -> !visitor.scanWithoutParsing(file))
+      .collect(Collectors.toList());
+  }
+
   public void scan(Iterable<? extends InputFile> inputFiles) {
     List<InputFile> filesNames = filterModuleInfo(inputFiles).collect(Collectors.toList());
     AnalysisProgress analysisProgress = new AnalysisProgress(filesNames.size());

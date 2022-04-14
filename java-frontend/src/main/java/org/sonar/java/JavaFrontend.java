@@ -40,6 +40,7 @@ import org.sonar.java.annotations.VisibleForTesting;
 import org.sonar.java.ast.JavaAstScanner;
 import org.sonar.java.ast.visitors.FileLinesVisitor;
 import org.sonar.java.ast.visitors.SyntaxHighlighterVisitor;
+import org.sonar.java.caching.CacheContextImpl;
 import org.sonar.java.collections.CollectionUtils;
 import org.sonar.java.filters.SonarJavaIssueFilter;
 import org.sonar.java.model.JParserConfig;
@@ -125,8 +126,16 @@ public class JavaFrontend {
     return sonarComponents != null && sonarComponents.analysisCancelled();
   }
 
-
   public void scan(Iterable<InputFile> sourceFiles, Iterable<InputFile> testFiles, Iterable<? extends InputFile> generatedFiles) {
+    if (isCacheEnabled()) {
+      LOG.info("The cache is enabled. The Java analyzer will try to leverage cached data from previous analyses.");
+      sourceFiles = astScanner.scanWithoutParsing(sourceFiles);
+      testFiles = astScannerForTests.scanWithoutParsing(testFiles);
+      generatedFiles = astScannerForGeneratedFiles.scanWithoutParsing(generatedFiles);
+    } else {
+      LOG.info("The cache is not enabled. The Java analyzer will not try to leverage data from a previous analysis.");
+    }
+
     // SonarLint is not compatible with batch mode, it needs InputFile#contents() and batch mode use InputFile#absolutePath()
     boolean isSonarLint = sonarComponents != null && sonarComponents.isSonarLintContext();
     boolean fileByFileMode = isSonarLint || isFileByFileEnabled();
@@ -360,6 +369,10 @@ public class JavaFrontend {
   @VisibleForTesting
   long getBatchModeSizeInKB() {
     return sonarComponents == null ? -1L : sonarComponents.getBatchModeSizeInKB();
+  }
+
+  private boolean isCacheEnabled() {
+    return sonarComponents != null && CacheContextImpl.of(sonarComponents.context()).isCacheEnabled();
   }
 
   private static <T> void scanAndMeasureTask(Iterable<T> files, Consumer<Iterable<T>> action, String descriptor) {
