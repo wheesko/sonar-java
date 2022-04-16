@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 import org.sonar.check.Rule;
 import org.sonar.check.RuleProperty;
-import org.sonar.java.checks.helpers.ShannonEntropy;
+import org.sonar.java.checks.helpers.RandomnessDetector;
 import org.sonar.java.model.ExpressionUtils;
 import org.sonar.plugins.java.api.tree.AssignmentExpressionTree;
 import org.sonar.plugins.java.api.tree.ExpressionTree;
@@ -35,16 +35,22 @@ import org.sonar.plugins.java.api.tree.Tree;
 import org.sonar.plugins.java.api.tree.Tree.Kind;
 import org.sonar.plugins.java.api.tree.VariableTree;
 
+import static org.sonar.java.checks.HardcodedIpCheck.IP_V6_ALONE;
+
 @Rule(key = "S6418")
 public class HardCodedSecretCheck extends AbstractHardCodedCredentialChecker {
 
   private static final String DEFAULT_SECRET_WORDS = "api[_.-]?key,auth,credential,secret,token";
-  private static final String DEFAULT_MIN_ENTROPY_THRESHOLD = "4.2";
+  private static final String DEFAULT_RANDOMNESS_SENSIBILITY= "5.0";
+  private static final int MINIMUM_CREDENTIAL_LENGTH = 17;
 
-  private static final String FIRST_ACCEPTED_CHARACTER = "[\\w.+/~$-]";
-  private static final String FOLLOWING_ACCEPTED_CHARACTER = "[=\\w.+/~$-]";
+  private static final String FIRST_ACCEPTED_CHARACTER = "[\\w.+/~$:&-]";
+  private static final String FOLLOWING_ACCEPTED_CHARACTER = "[=\\w.+/~$:&-]";
   private static final Pattern SECRET_PATTERN =
     Pattern.compile(FIRST_ACCEPTED_CHARACTER + "(" + FOLLOWING_ACCEPTED_CHARACTER + "|\\\\\\\\" + FOLLOWING_ACCEPTED_CHARACTER + ")++");
+  private static final Pattern IPV_6_PATTERN = Pattern.compile(IP_V6_ALONE);
+
+  private RandomnessDetector randomnessDetector;
 
   @RuleProperty(
     key = "secretWords",
@@ -53,10 +59,10 @@ public class HardCodedSecretCheck extends AbstractHardCodedCredentialChecker {
   public String secretWords = DEFAULT_SECRET_WORDS;
 
   @RuleProperty(
-    key = "minEntropyThreshold",
-    description = "Minimum shannon entropy threshold of the secret",
-    defaultValue = DEFAULT_MIN_ENTROPY_THRESHOLD)
-  public double minEntropyThreshold = Double.parseDouble(DEFAULT_MIN_ENTROPY_THRESHOLD);
+    key = "randomnessSensibility",
+    description = "Allows to tune the Randomness Sensibility (from 0 to 10)",
+    defaultValue = DEFAULT_RANDOMNESS_SENSIBILITY)
+  public double randomnessSensibility = Double.parseDouble(DEFAULT_RANDOMNESS_SENSIBILITY);
 
   @Override
   protected String getCredentialWords() {
@@ -99,9 +105,22 @@ public class HardCodedSecretCheck extends AbstractHardCodedCredentialChecker {
 
   @Override
   protected boolean isPotentialCredential(String literal) {
-    return super.isPotentialCredential(literal)
-      && ShannonEntropy.calculate(literal) >= minEntropyThreshold
-      && SECRET_PATTERN.matcher(literal).matches();
+    if (literal.length() < MINIMUM_CREDENTIAL_LENGTH || !SECRET_PATTERN.matcher(literal).matches()) {
+      return false;
+    }
+    return getRandomnessDetector().isRandom(literal)
+      && isNotIpV6(literal);
+  }
+
+  private RandomnessDetector getRandomnessDetector() {
+    if (randomnessDetector == null) {
+      randomnessDetector = new RandomnessDetector(randomnessSensibility);
+    }
+    return randomnessDetector;
+  }
+
+  private static boolean isNotIpV6(String literal) {
+    return !IPV_6_PATTERN.matcher(literal).matches();
   }
 
   @Override

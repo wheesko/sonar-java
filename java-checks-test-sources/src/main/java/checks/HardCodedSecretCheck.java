@@ -61,7 +61,7 @@ class HardCodedSecretCheck {
     String query6 = "secret=\"%s\""; // Compliant
     String query7 = "\"secret=\""; // Compliant
 
-    String params1 = "user=admin&secret=Secretabcdefghijklmnopqrs"; // Noncompliant
+    String params1 = "user=admin&secret=Secret0123456789012345678"; // Noncompliant
     String params2 = "secret=no\nuser=admin0123456789"; // Compliant
     String sqlserver1= "pgsql:host=localhost port=5432 dbname=test user=postgres secret=abcdefghijklmnopqrs"; // Noncompliant
     String sqlserver2 = "pgsql:host=localhost port=5432 dbname=test secret=no user=abcdefghijklmnopqrs"; // Compliant
@@ -69,6 +69,9 @@ class HardCodedSecretCheck {
     // Spaces and & are not included into the token, it shows us the end of the token.
     String params3 = "token=abcdefghijklmnopqrs user=admin"; // Noncompliant
     String params4 = "token=abcdefghijklmnopqrs&user=admin"; // Noncompliant
+
+    String params5 = "token=123456&abcdefghijklmnopqrs"; // Compliant, FN, even if "&" is accepted in a password, it also indicates a cut in a string literal
+    String params6 = "token=123456:abcdefghijklmnopqrs"; // Noncompliant
 
     // URLs are reported by S2068 only.
     String[] urls = {
@@ -91,10 +94,35 @@ class HardCodedSecretCheck {
     String variableNameWithSecretInItAnonymous = "anonymous";
     String otherVariableNameWithAuthInIt;
 
+    // Secret containing words and random characters should be filtered
+    String secret001 = "sk_live_xf2fh0Hu3LqXlqqUg2DEWhEz"; // Noncompliant
+    String secret002 = "examples/commit/16ad89c4172c259f15bce56e";
+    String secret003 = "examples/commit/8e1d746900f5411e9700fea0"; // Noncompliant
+    String secret004 = "examples/commit/revision/469001e9700fea0";
+    String secret005 = "xml/src/main/java/org/xwiki/xml/html/file";
+    String secret006 = "abcdefghijklmnop"; // Compliant
+    String secret007 = "abcdefghijklmnopq"; // Noncompliant
+    String secret008 = "0123456789abcdef0"; // Noncompliant
+    String secret009 = "012345678901234567890123456789"; // Noncompliant
+    String secret010 = "abcdefghijklmnopabcdefghijkl"; // Noncompliant
+    String secret011 = "012345670123456701234567012345";
+    String secret012 = "012345678012345678012345678012"; // Noncompliant
+    String secret013 = "234.167.076.123";
+    String ip_secret1 = "bfee:e3e1:9a92:6617:02d5:256a:b87a:fbcc"; // Compliant: ipv6 format
+    String ip_secret2 = "2001:db8:1::ab9:C0A8:102"; // Compliant: ipv6 format
+    String ip_secret3 = "::ab9:C0A8:102"; // Compliant: ipv6 format
+    String secret015 = "org.apache.tomcat.util.buf.UDecoder.ALLOW_ENCODED_SLASH";
+    // Example of Telegram bot token
+    String secret016 = "bot123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"; // Noncompliant
+    // Secret with "&"
+    String secret017 = "012&345678012345678012345&678012"; // Noncompliant
+    String secret018 = "&12&345678012345678012345&67801&"; // Noncompliant
+
+
     // Don't filter when the secret is containing any of the secret word.
-    String secretConst = "Secret_abcdefghijklmnopqrs"; // Noncompliant
-    String secrets = "secret_abcdefghijklmnopqrs"; // Noncompliant
-    final String SECRET = "Secret_abcdefghijklmnopqrs"; // Noncompliant
+    String secretConst = "Secret_0123456789012345678"; // Noncompliant
+    String secrets = "secret_0123456789012345678"; // Noncompliant
+    final String SECRET = "Secret_0123456789012345678"; // Noncompliant
     // Simple constants will be filtered thanks to the entropy check
     final String SECRET_INPUT = "[id='secret']"; // Compliant
     final String SECRET_PROPERTY = "custom.secret"; // Compliant
@@ -131,7 +159,6 @@ class HardCodedSecretCheck {
     String OKAPI_KEYBOARD = "what a strange QWERTY keyboard for animals"; // Compliant
     String okApiKeyValue = "Spaces are UNEXPECTED 012 345 678"; // Compliant
     String tokenism = "(Queen's Partner's Stored Knowledge is a Minimal Sham)"; // Compliant
-    String tokenWithExcludedCharacters = "abcdefghij&klmnopqrs"; // Compliant
     String tokenWithExcludedCharacters2 = "abcdefghij|klmnopqrs"; // Compliant
 
     // ========== 3. Assignment ==========
