@@ -7,11 +7,8 @@ import org.sonar.plugins.java.api.semantic.Type;
 import org.sonar.plugins.java.api.tree.*;
 import org.sonar.plugins.java.api.tree.Tree.Kind;
 
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /***
 * Law of Demeter check
@@ -24,22 +21,20 @@ import java.util.stream.Stream;
  * Methods of static fields :check:
 * ***/
 
-@Rule(key = "MyFirstCustomRule")
-public class MyFirstCustomCheck extends IssuableSubscriptionVisitor {
+@Rule(key = "LawOfDemeterRule")
+public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
 
   @Override
   public List<Kind> nodesToVisit() {
-    return Collections.singletonList(Kind.CLASS);
+    return Collections.singletonList(Kind.METHOD_INVOCATION);
   }
 
   @Override
   public void visitNode(Tree tree) {
-    ClassTree classTree = (ClassTree) tree;
-    List<MethodTree> methods = findClassMethods(classTree);
+    MethodInvocationTree methodInvocationTree = (MethodInvocationTree) tree;
+    MethodTree owningMethod = findOwningMethod(methodInvocationTree);
 
-    methods.forEach(method ->
-      findMethodInvocationsInMethod(method).forEach(methodInvocation -> validateLawOfDemeter(method, methodInvocation))
-    );
+    validateLawOfDemeter(owningMethod, methodInvocationTree);
   }
 
   private void validateLawOfDemeter(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
@@ -64,7 +59,9 @@ public class MyFirstCustomCheck extends IssuableSubscriptionVisitor {
       return;
     }
 
-    reportIssue(methodInvocationTree, "LawOfDemeterViolation");
+    MemberSelectExpressionTree methodInvocation = (MemberSelectExpressionTree) methodInvocationTree.methodSelect();
+
+    reportIssue(methodInvocation.identifier(), "LawOfDemeterViolation");
   }
 
   private boolean calledMethodIsStatic(MethodInvocationTree methodInvocationTree) {
@@ -74,24 +71,44 @@ public class MyFirstCustomCheck extends IssuableSubscriptionVisitor {
 
   private boolean calledMethodIsMemberOfSameObject(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
     Tree methodClass = findOwningClass(methodTree);
-    Tree invokedMethodOwner = findOwningClass(getInvokedMethodDeclarationTree(methodInvocationTree));
+    Optional<Tree> declarationTree = getInvokedMethodDeclarationTree(methodInvocationTree);
+    if (!declarationTree.isPresent()) {
+      return true;
+    }
+    Tree invokedMethodOwner = findOwningClass(declarationTree.get());
     return invokedMethodOwner.equals(methodClass);
   }
 
   private boolean calledMethodBelongsToOneOfParameters(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
-    ClassTree invokedMethodOwner = (ClassTree) findOwningClass(getInvokedMethodDeclarationTree(methodInvocationTree));
+    Optional<Tree> invokedMethodDeclaration = getInvokedMethodDeclarationTree(methodInvocationTree);
+    if (!invokedMethodDeclaration.isPresent()) {
+      return true;
+    }
+    ClassTree invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
     Type ownerType = invokedMethodOwner.symbol().type();
     List<Type> trees = methodTree.parameters().stream().map(param -> param.type().symbolType()).collect(Collectors.toList());
     return trees.contains(ownerType);
   }
 
   private boolean calledMethodBelongsToVariableInMethod(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
-    ClassTree invokedMethodOwner = (ClassTree) findOwningClass(getInvokedMethodDeclarationTree(methodInvocationTree));
+    Optional<Tree> invokedMethodDeclaration = getInvokedMethodDeclarationTree(methodInvocationTree);
+    if (!invokedMethodDeclaration.isPresent()) {
+      return true;
+    }
+    ClassTree invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
     Type ownerType = invokedMethodOwner.symbol().type();
-    List<Type> variablesInMethod = methodTree.block().body()
+    List<Type> variablesInMethod = Optional.ofNullable(methodTree.block())
+      .map(BlockTree::body)
+      .orElse(Collections.emptyList())
       .stream()
       .filter(statementTree -> statementTree.is(Kind.VARIABLE))
       .map(VariableTree.class::cast)
+      // If a variable is not initialized or initialized using a method invocation, it probably is incorrect to call it's methods,
+      // hence it should not be added to the "whitelist" of usable variables in a method
+      .filter(variableTree -> Optional.ofNullable(variableTree.initializer())
+        .map(tree -> !tree.is(Kind.METHOD_INVOCATION))
+        .orElse(false)
+      )
       .map(VariableTree::symbol)
       .map(Symbol::type)
       .collect(Collectors.toList());
@@ -100,57 +117,43 @@ public class MyFirstCustomCheck extends IssuableSubscriptionVisitor {
   }
 
   private boolean calledMethodBelongsToOneOfClassVariables(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
-    ClassTree methodClass = (ClassTree) findOwningClass(methodTree);
+    ClassTree methodClass = findOwningClass(methodTree);
     List<Type> classVariables = methodClass.members()
       .stream()
       .filter(tree -> tree.is(Kind.VARIABLE))
       .map(VariableTree.class::cast)
       .map(tree -> tree.symbol().type())
       .collect(Collectors.toList());
-    ClassTree invokedMethodOwner = (ClassTree) findOwningClass(getInvokedMethodDeclarationTree(methodInvocationTree));
+
+    Optional<Tree> methodDeclaration = getInvokedMethodDeclarationTree(methodInvocationTree);
+    if (!methodDeclaration.isPresent()) {
+      return true;
+    }
+    ClassTree invokedMethodOwner = findOwningClass(methodDeclaration.get());
     Type t = invokedMethodOwner.symbol().type();
 
     return classVariables.contains(t);
   }
 
-  private Tree getInvokedMethodDeclarationTree(MethodInvocationTree methodInvocationTree) {
+  private Optional<Tree> getInvokedMethodDeclarationTree(MethodInvocationTree methodInvocationTree) {
     MemberSelectExpressionTree memberSelectExpressionTree = (MemberSelectExpressionTree) methodInvocationTree.methodSelect();
-    return memberSelectExpressionTree.identifier().symbol().declaration();
+    return Optional.ofNullable(memberSelectExpressionTree.identifier().symbol().declaration());
   }
 
-  private Tree findOwningClass(Tree methodTree) {
+  private ClassTree findOwningClass(Tree methodTree) {
     Tree parent = methodTree.parent();
     while (parent != null && !parent.is(Kind.CLASS)) {
       parent = parent.parent();
     }
-    return parent;
+    return (ClassTree) parent;
   }
 
-  /* Find methods in class */
-  private List<MethodTree> findClassMethods(ClassTree classTree) {
-    return classTree.members()
-      .stream().filter(m -> m.is(Kind.METHOD))
-      .map(MethodTree.class::cast)
-      .collect(Collectors.toList());
-  }
-
-  /* In a method m, find all method invocations MI */
-  private List<MethodInvocationTree> findMethodInvocationsInMethod(MethodTree methodTree) {
-    List<MethodInvocationTree> methodInvocationTrees = findExpressionsInMethod(methodTree)
-      .filter(expressionStatementTree -> expressionStatementTree.expression().is(Kind.METHOD_INVOCATION))
-      .map(expressionStatementTree -> (MethodInvocationTree) expressionStatementTree.expression())
-      .collect(Collectors.toList());
-    return methodInvocationTrees;
-  }
-
-  /* In a method m, find all method invocations MI */
-  private Stream<ExpressionStatementTree> findExpressionsInMethod(MethodTree methodTree) {
-    return Optional.ofNullable(methodTree.block())
-      .map(BlockTree::body)
-      .orElse(Collections.emptyList())
-      .stream()
-      .filter(body -> body.is(Kind.EXPRESSION_STATEMENT))
-      .map(ExpressionStatementTree.class::cast);
+  private MethodTree findOwningMethod(MethodInvocationTree methodTree) {
+    Tree parent = methodTree.parent();
+    while (parent != null && !parent.is(Kind.METHOD)) {
+      parent = parent.parent();
+    }
+    return (MethodTree) parent;
   }
 }
 

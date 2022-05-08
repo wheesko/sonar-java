@@ -227,7 +227,7 @@ java.lang.AssertionError: No issue raised. At least one issue expected
     at org.sonar.java.checks.verifier.InternalCheckVerifier.checkIssues(InternalCheckVerifier.java:231)
     at org.sonar.java.checks.verifier.InternalCheckVerifier.verifyAll(InternalCheckVerifier.java:222)
     at org.sonar.java.checks.verifier.InternalCheckVerifier.verifyIssues(InternalCheckVerifier.java:167)
-    at org.sonar.samples.java.checks.MyFirstCustomCheckTest.test(MyFirstCustomCheckTest.java:13)
+    at org.sonar.samples.java.checks.LawOfDemeterCheckTest.test(MyFirstCustomCheckTest.java:13)
     ...
 ```
 
@@ -287,7 +287,7 @@ java.lang.AssertionError: Unexpected at [5, 7, 11]
     at org.sonar.java.checks.verifier.InternalCheckVerifier.checkIssues(InternalCheckVerifier.java:231)
     at org.sonar.java.checks.verifier.InternalCheckVerifier.verifyAll(InternalCheckVerifier.java:222)
     at org.sonar.java.checks.verifier.InternalCheckVerifier.verifyIssues(InternalCheckVerifier.java:167)
-    at org.sonar.samples.java.checks.MyFirstCustomCheckTest.test(MyFirstCustomCheckTest.java:13)
+    at org.sonar.samples.java.checks.LawOfDemeterCheckTest.test(MyFirstCustomCheckTest.java:13)
     ...
 ```
 
