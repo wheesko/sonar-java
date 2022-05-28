@@ -7,12 +7,23 @@ class LawOfDemeterCheckTest {
 
   @Test
   void test() {
-/*    CheckVerifier.newVerifier()
+    CheckVerifier.newVerifier()
       .onFile("src/test/files/LawOfDemeterCheck.java")
       .withCheck(new LawOfDemeterCheck())
-      .verifyIssues();*/
+      .verifyIssues();
+
+    CheckVerifier.newVerifier()
+      .onFile("src/test/files/LawOfDemeterDemo.java")
+      .withCheck(new LawOfDemeterCheck())
+      .verifyIssues();
+
     CheckVerifier.newVerifier()
       .onFile("src/test/files/LawOfDemeterStreams.java")
+      .withCheck(new LawOfDemeterCheck())
+      .verifyNoIssues();
+
+    CheckVerifier.newVerifier()
+      .onFile("src/test/files/LawOfDemeterOptional.java")
       .withCheck(new LawOfDemeterCheck())
       .verifyNoIssues();
   }

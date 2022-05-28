@@ -1,14 +1,15 @@
 package org.sonar.samples.java.checks;
 
 import org.sonar.check.Rule;
+import org.sonar.check.RuleProperty;
 import org.sonar.plugins.java.api.IssuableSubscriptionVisitor;
-import org.sonar.plugins.java.api.semantic.Symbol;
 import org.sonar.plugins.java.api.semantic.Type;
 import org.sonar.plugins.java.api.tree.*;
 import org.sonar.plugins.java.api.tree.Tree.Kind;
 
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /***
 * Law of Demeter check
@@ -24,6 +25,25 @@ import java.util.stream.Collectors;
 @Rule(key = "LawOfDemeterRule")
 public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
 
+  private static final String ALLOWED_METHOD_NAME_PATTERNS = "java.lang.InterruptedException, " +
+    "java.lang.NumberFormatException, " +
+    "java.lang.NoSuchMethodException, " +
+    "java.text.ParseException, " +
+    "java.net.MalformedURLException, " +
+    "java.time.format.DateTimeParseException";
+
+  @RuleProperty(
+    key = "methodNameExceptions",
+    description = "List of allowed method names, seperated by commas",
+    defaultValue = "" + ALLOWED_METHOD_NAME_PATTERNS)
+  public String allowedMethodNamePatterns = ALLOWED_METHOD_NAME_PATTERNS;
+
+  @RuleProperty(
+    key = "enableExceptions",
+    description = "Enable use of exceptions",
+    defaultValue = "false")
+  public boolean allowRuleExceptions = false;
+
   @Override
   public List<Kind> nodesToVisit() {
     return Collections.singletonList(Kind.METHOD_INVOCATION);
@@ -32,30 +52,39 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
   @Override
   public void visitNode(Tree tree) {
     MethodInvocationTree methodInvocationTree = (MethodInvocationTree) tree;
-    MethodTree owningMethod = findOwningMethod(methodInvocationTree);
+    Optional<MethodTree> owningMethod = findOwningMethod(methodInvocationTree);
 
     validateLawOfDemeter(owningMethod, methodInvocationTree);
   }
 
-  private void validateLawOfDemeter(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
+  private void validateLawOfDemeter(Optional<MethodTree> methodTree, MethodInvocationTree methodInvocationTree) {
+    // if method has no parent, means it probably is an internal java class
+    if (!methodTree.isPresent()) {
+      return;
+    }
+
+    if (methodNameBelongsToOneOfExceptions(methodInvocationTree)) {
+      return;
+    }
+
     // Check Law of Demeter conditions one by one. If all are false, return false, if any are true, return true.
     if (calledMethodIsStatic(methodInvocationTree)) {
       return;
     }
 
-    if (calledMethodIsMemberOfSameObject(methodTree, methodInvocationTree)) {
+    if (calledMethodIsMemberOfSameObject(methodTree.get(), methodInvocationTree)) {
       return;
     }
 
-    if (calledMethodBelongsToOneOfParameters(methodTree, methodInvocationTree)) {
+    if (calledMethodBelongsToOneOfParameters(methodTree.get(), methodInvocationTree)) {
       return;
     }
 
-    if (calledMethodBelongsToOneOfClassVariables(methodTree, methodInvocationTree)) {
+    if (calledMethodBelongsToOneOfClassVariables(methodTree.get(), methodInvocationTree)) {
       return;
     }
 
-    if (calledMethodBelongsToVariableInMethod(methodTree, methodInvocationTree)) {
+    if (calledMethodBelongsToVariableInMethod(methodTree.get(), methodInvocationTree)) {
       return;
     }
 
@@ -64,18 +93,25 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
     reportIssue(methodInvocation.identifier(), "LawOfDemeterViolation");
   }
 
+  private boolean methodNameBelongsToOneOfExceptions(MethodInvocationTree methodInvocationTree) {
+    MemberSelectExpressionTree memberSelectExpT = (MemberSelectExpressionTree) methodInvocationTree.methodSelect();
+
+    return this.allowRuleExceptions && Arrays.stream(this.allowedMethodNamePatterns.split(", "))
+      .anyMatch(ruleExceptionPattern -> memberSelectExpT.identifier().name().matches(ruleExceptionPattern));
+  }
+
   private boolean calledMethodIsStatic(MethodInvocationTree methodInvocationTree) {
     MemberSelectExpressionTree memberSelectExpT = (MemberSelectExpressionTree) methodInvocationTree.methodSelect();
     return memberSelectExpT.identifier().symbol().isStatic();
   }
 
   private boolean calledMethodIsMemberOfSameObject(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
-    Tree methodClass = findOwningClass(methodTree);
+    Optional<ClassTree> methodClass = findOwningClass(methodTree);
     Optional<Tree> declarationTree = getInvokedMethodDeclarationTree(methodInvocationTree);
-    if (!declarationTree.isPresent()) {
+    if (!declarationTree.isPresent() || !methodClass.isPresent()) {
       return true;
     }
-    Tree invokedMethodOwner = findOwningClass(declarationTree.get());
+    Optional<ClassTree> invokedMethodOwner = findOwningClass(declarationTree.get());
     return invokedMethodOwner.equals(methodClass);
   }
 
@@ -84,8 +120,13 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
     if (!invokedMethodDeclaration.isPresent()) {
       return true;
     }
-    ClassTree invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
-    Type ownerType = invokedMethodOwner.symbol().type();
+
+    Optional<ClassTree> invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
+    if (!invokedMethodOwner.isPresent()) {
+      return true;
+    }
+
+    Type ownerType = invokedMethodOwner.get().symbol().type();
     List<Type> trees = methodTree.parameters().stream().map(param -> param.type().symbolType()).collect(Collectors.toList());
     return trees.contains(ownerType);
   }
@@ -95,8 +136,13 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
     if (!invokedMethodDeclaration.isPresent()) {
       return true;
     }
-    ClassTree invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
-    Type ownerType = invokedMethodOwner.symbol().type();
+
+    Optional<ClassTree> invokedMethodOwner = findOwningClass(invokedMethodDeclaration.get());
+    if(!invokedMethodOwner.isPresent()) {
+      return true;
+    }
+
+    Type ownerType = invokedMethodOwner.get().symbol().type();
     List<Type> variablesInMethod = Optional.ofNullable(methodTree.block())
       .map(BlockTree::body)
       .orElse(Collections.emptyList())
@@ -109,28 +155,36 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
         .map(tree -> !tree.is(Kind.METHOD_INVOCATION))
         .orElse(false)
       )
-      .map(VariableTree::symbol)
-      .map(Symbol::type)
+      .flatMap(this::findAllChildTypes)
       .collect(Collectors.toList());
 
     return variablesInMethod.contains(ownerType);
   }
 
   private boolean calledMethodBelongsToOneOfClassVariables(MethodTree methodTree, MethodInvocationTree methodInvocationTree) {
-    ClassTree methodClass = findOwningClass(methodTree);
-    List<Type> classVariables = methodClass.members()
-      .stream()
+    Optional<ClassTree> methodClass = findOwningClass(methodTree);
+    if (!methodClass.isPresent()) {
+      return true;
+    }
+
+    List<Type> classVariables = methodClass.get()
+      .members().stream()
       .filter(tree -> tree.is(Kind.VARIABLE))
       .map(VariableTree.class::cast)
-      .map(tree -> tree.symbol().type())
+      .flatMap(this::findAllChildTypes)
       .collect(Collectors.toList());
 
     Optional<Tree> methodDeclaration = getInvokedMethodDeclarationTree(methodInvocationTree);
     if (!methodDeclaration.isPresent()) {
       return true;
     }
-    ClassTree invokedMethodOwner = findOwningClass(methodDeclaration.get());
-    Type t = invokedMethodOwner.symbol().type();
+
+    Optional<ClassTree> invokedMethodOwner = findOwningClass(methodDeclaration.get());
+    if (!invokedMethodOwner.isPresent()) {
+      return true;
+    }
+
+    Type t = invokedMethodOwner.get().symbol().type();
 
     return classVariables.contains(t);
   }
@@ -140,25 +194,43 @@ public class LawOfDemeterCheck extends IssuableSubscriptionVisitor {
     return Optional.ofNullable(memberSelectExpressionTree.identifier().symbol().declaration());
   }
 
-  private ClassTree findOwningClass(Tree methodTree) {
+  private Optional<ClassTree> findOwningClass(Tree methodTree) {
     Tree parent = methodTree.parent();
     while (parent != null && !parent.is(Kind.CLASS)) {
       parent = parent.parent();
     }
-    return (ClassTree) parent;
+    return Optional.ofNullable((ClassTree) parent);
   }
 
-  private MethodTree findOwningMethod(MethodInvocationTree methodTree) {
+  private Optional<MethodTree> findOwningMethod(MethodInvocationTree methodTree) {
     Tree parent = methodTree.parent();
     while (parent != null && !parent.is(Kind.METHOD)) {
       parent = parent.parent();
     }
-    return (MethodTree) parent;
+
+    return Optional.ofNullable((MethodTree) parent);
+  }
+
+  private Stream<Type> findAllChildTypes(VariableTree tree) {
+    Type type = tree.symbol().type();
+    return Stream.concat(
+      Stream.of(type),
+      getAllTypeArgumentTypes(type, new ArrayList<>()).stream()
+    );
+  }
+
+  private List<Type> getAllTypeArgumentTypes(Type t, List<Type> foundTypes) {
+    t.typeArguments().forEach(type -> {
+      if (!type.typeArguments().isEmpty()) {
+        getAllTypeArgumentTypes(type, foundTypes);
+      }
+
+      if (!foundTypes.contains(type)) {
+        foundTypes.add(type);
+      }
+    });
+
+    return foundTypes;
   }
 }
 
-
-/*
-* Active bugs:
-* Method chains not parsed correctly (only last method is evaluated)
-* */
